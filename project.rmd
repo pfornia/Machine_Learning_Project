@@ -1,0 +1,102 @@
+---
+title: "Machine Learning Project"
+author: "Paul Fornia"
+date: "Sunday, June 21, 2015"
+output: html_document
+---
+
+The purpose of this project is to use accelerometer data from wearable devices to determine the form of participants performing weight lifting exercises.
+
+Participants performed barbell lifts in 5 different ways. The data we are using records the output from the accelerometers in their wearble devices (such as Jawbone, Fitbit, etc.), and also records which of the 5 movement types the participant was doing.
+
+For the test data, all the same information is provided, but without the movement type. The goal is to use machine learning to predict the movement types for each observation in this test set.
+
+First, I load neccessary libraries.
+
+```{r, include = FALSE}
+library(caret)
+library(rattle)
+library(rpart.plot)
+library(ipred)
+```
+
+Next, I read in all the data.
+
+```{r, results = "hide"}
+testRaw <- read.csv("pml-testing.csv")
+trainRaw <- read.csv("pml-training.csv")
+```
+
+If a field is all NA, then I mark it to be thrown it out, as it certainly will not be useful in training a machine learning algorithm. I also mark several other fields as not relevant, such as observation ID, user name, or time of day. I filter both data tables for only "relevant" fields.
+
+```{r}
+testRelevantVars <- !is.na(testRaw[1,])
+testRelevantVars[c(1, 2, 3, 4, 5)] <- FALSE
+
+testRelevant <- testRaw[,testRelevantVars]
+trainRelevant <- trainRaw[,testRelevantVars]
+```
+
+Although I have a "test" data set already, I'm going to further partition my "raw" training data set into what I'll now refer to as training and test sets. By doing this, I'll have a test data set against which I can cross validate any results. If needed, I will iteratively re-sample different portions of my raw training data in a k-folds validation method. But for now, I'll start with just one "testing" sample.
+
+```{r}
+inTrain <- createDataPartition(y=trainRelevant$classe, p = 0.75, list=FALSE)
+
+training <- trainRelevant[inTrain,]
+crossTesting <- trainRelevant[-inTrain,]
+```
+
+I'll jump in with a simple tree, using the **rpart** method of the **train** function from the **caret** package.
+
+```{r, results = "hide"}
+set.seed(111)
+
+cartFit <- train(classe~., training, method = "rpart")
+```
+
+I can test the results of this method again the cross-validation test set.
+
+```{r}
+cartPred <- predict(cartFit, crossTesting)
+mean(cartPred == crossTesting$classe)
+```
+
+This code gives the average of an array of ones and zeros, where a one indicates a correct prediction. Effectively, this gives a simple success rate. The "rpart" method produces a success rate of about 57%. To better understand these results, we can display the tree.
+
+```{r}
+fancyRpartPlot(cartFit$finalModel)
+```
+
+This plot reveals why the machine learning algorith is not doing well. Using a very rich data set of dozens of variables, our simple model only uses 6 to determine which type of movement is being performed.
+
+I will now try to see if a better algorithm can produce stronger results.
+
+I'll try the "treebag" method, which is a bootstrap aggregating ("bagging") version of the rpart method above. This should create many of these trees, each of which will only use a few variables. But together, most (if not all) of the variables will help inform which movement type is being performed.
+
+```{r, results = "hide", eval = FALSE}
+treebagFit <- train(classe~., training, method = "treebag")
+treebagPred <- predict(treebagFit, crossTesting)
+mean(treebagPred == crossTesting$classe)
+```
+
+This method produces a success rate of 99.5% on the cross-validation test set.
+
+Typically, I would use k-fold cross-validation to get a better estimate of success rate; however, in this case, 99.5% is more than accurate enough for our purposes. Even if this is an annomally, and accuracy is less than 99% or even 98% when applied to the raw test data, this is more than sufficient for predicting 20 observations.
+
+I'll go ahead and apply this method to the raw test data, and prepare the results for submission.
+
+```{r, results = "hide", eval = FALSE}
+testPred <- predict(treebagFit, testRelevant)
+
+pml_write_files = function(x){
+    n = length(x)
+    for(i in 1:n){
+        filename = paste0("problem_id_",i,".txt")
+        write.table(as.character(x[i]),file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+    }
+}
+
+pml_write_files(testPred)
+```
+
+As I hoped, the success rate was 20/20 on the raw test data.
